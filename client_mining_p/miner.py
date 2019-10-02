@@ -4,7 +4,7 @@ import requests
 import sys
 
 
-# TODO: Implement functionality to search for a proof 
+# TODO: Implement functionality to search for a proof
 
 
 if __name__ == '__main__':
