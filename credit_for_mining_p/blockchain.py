@@ -225,6 +225,7 @@ def mine():
     last_block = blockchain.last_block
     last_block_string = json.dumps(last_block, sort_keys=True).encode()
     proof = request.get_json()['proof']
+    id = request.get_json()['id']
     print('proof', proof)
 
     if not blockchain.valid_proof(last_block_string, proof):
@@ -238,7 +239,7 @@ def mine():
         # The amount is 1 coin as a reward for mining the next block
         blockchain.new_transaction(
             sender="0",
-            recipient=node_identifier,
+            recipient=id,
             amount=1,
         )
 

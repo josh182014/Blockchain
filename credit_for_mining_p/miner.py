@@ -60,7 +60,7 @@ if __name__ == '__main__':
         new_proof = proof_of_work(data['last_block'])
 
         # TODO: When found, POST it to the server {"block": new_block}
-        post_data = {'proof': new_proof}
+        post_data = {'proof': new_proof, 'id': 5}
         data = requests.post(url=node + '/mine', json=post_data).json()
         # TODO: If the server responds with 'New Block Forged'
 
