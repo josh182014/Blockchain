@@ -1,11 +1,13 @@
-# Paste your version of blockchain.py from the basic_block_gp
-# folder here
 import hashlib
 import json
+import sys
+import requests
 from time import time
 from uuid import uuid4
 
 from flask import Flask, jsonify, request
+
+from urllib.parse import urlparse
 
 
 class Blockchain(object):
@@ -14,7 +16,24 @@ class Blockchain(object):
         self.current_transactions = []
         self.nodes = set()
 
-        self.new_block(previous_hash=1, proof=100)
+        self.create_genesis_block()
+
+    def create_genesis_block(self):
+        """
+        Create the genesis block
+
+        These are hardcoded into _most_ if not all blockchain protocols
+        """
+
+        block = {
+            'index': 1,
+            'timestamp': 1,
+            'transactions': [],
+            'proof': 1,
+            'previous_hash': 1,
+        }
+
+        self.chain.append(block)
 
     def new_block(self, proof, previous_hash=None):
         """
@@ -57,6 +76,10 @@ class Blockchain(object):
 
         return self.last_block['index'] + 1
 
+    def register_node(self, node):
+        parsed_url = urlparse(node)
+        self.nodes.add(parsed_url.netloc)
+
     @staticmethod
     def hash(block):
         """
@@ -82,25 +105,52 @@ class Blockchain(object):
         # easer to work with and understand.
         return hashlib.sha256(block_string).hexdigest()
 
+    def broadcast_new_block(self, block):
+        """
+        Alert neighbors that a new block ahs been mined
+        and the should add it to their block as well
+        """
+
+        neighbors = self.nodes
+
+        post_data = {"block": block}
+
+        for node in neighbors:
+            response = requests.post(f'http://{node}/block/new', json=post_data)
+
+            if response.status_code != 200:
+                # TODO error hadndling
+                pass
+
+    def add_block(self, block):
+        """
+        Add a validated received block to the end of the chain
+        """
+
+        # reset our pending transactions
+        self.current_transactions = []
+
+        self.chain.append(block)
+
     @property
     def last_block(self):
         return self.chain[-1]
 
-    def proof_of_work(self, block):
-        """
-        Simple Proof of Work Algorithm
-        Find a number p such that hash(last_block_string, p) contains 6 leading
-        zeroes
-        :return: A valid proof for the provided block
-        """
+    # def proof_of_work(self, block):
+    #     """
+    #     Simple Proof of Work Algorithm
+    #     Find a number p such that hash(last_block_string, p) contains 6 leading
+    #     zeroes
+    #     :return: A valid proof for the provided block
+    #     """
 
-        block_string = json.dumps(block, sort_keys=True).encode()
+    #     block_string = json.dumps(block, sort_keys=True).encode()
 
-        proof = 0
-        while self.valid_proof(block_string, proof) is False:
-            proof += 1
+    #     proof = 0
+    #     while self.valid_proof(block_string, proof) is False:
+    #         proof += 1
 
-        return proof
+    #     return proof
 
     @staticmethod
     def valid_proof(block_string, proof):
@@ -119,7 +169,7 @@ class Blockchain(object):
         guess_hash = hashlib.sha256(guess).hexdigest()
 
         # TODO: Change back to six zeroes
-        return guess_hash[:3] == "000"
+        return guess_hash[:5] == "00000"
 
     def valid_chain(self, chain):
         """
@@ -166,34 +216,44 @@ node_identifier = str(uuid4()).replace('-', '')
 blockchain = Blockchain()
 
 
-@app.route('/mine', methods=['GET'])
+@app.route('/mine', methods=['POST'])
 def mine():
     # We run the proof of work algorithm to get the next proof...
-    proof = blockchain.proof_of_work(blockchain.last_block)
+    last_block = blockchain.last_block
+    last_block_string = json.dumps(last_block, sort_keys=True).encode()
+    proof = request.get_json()['proof']
+    print('proof', proof)
 
-    # We must receive a reward for finding the proof.
-    # The sender is "0" to signify that this node has mine a new coin
-    # The recipient is the current node, it did the mining!
-    # The amount is 1 coin as a reward for mining the next block
-    blockchain.new_transaction(
-        sender="0",
-        recipient=node_identifier,
-        amount=1,
-    )
+    if not blockchain.valid_proof(last_block_string, proof):
+        response = {'message': 'Proof was invalid or too late'}
+        return jsonify(response), 200
 
-    # Forge the new Block by adding it to the chain
-    previous_hash = blockchain.hash(blockchain.last_block)
-    block = blockchain.new_block(proof, previous_hash)
+    else:
+        # We must receive a reward for finding the proof.
+        # The sender is "0" to signify that this node has mine a new coin
+        # The recipient is the current node, it did the mining!
+        # The amount is 1 coin as a reward for mining the next block
+        blockchain.new_transaction(
+            sender="0",
+            recipient=node_identifier,
+            amount=1,
+        )
 
-    # Send a response with the new block
-    response = {
-        'message': "New Block Forged",
-        'index': block['index'],
-        'transactions': block['transactions'],
-        'proof': block['proof'],
-        'previous_hash': block['previous_hash'],
-    }
-    return jsonify(response), 200
+        # Forge the new Block by adding it to the chain
+        previous_hash = blockchain.hash(blockchain.last_block)
+        block = blockchain.new_block(proof, previous_hash)
+
+        blockchain.broadcast_new_block(block)
+
+        # Send a response with the new block
+        response = {
+            'message': "New Block Forged",
+            'index': block['index'],
+            'transactions': block['transactions'],
+            'proof': block['proof'],
+            'previous_hash': block['previous_hash'],
+        }
+        return jsonify(response), 200
 
 
 @app.route('/transactions/new', methods=['POST'])
@@ -232,6 +292,94 @@ def validate_chain():
     return jsonify(response), 200
 
 
-# Run the program on port 5000
+@app.route('/last_block', methods=['GET'])
+def return_last_block():
+    last_block = blockchain.last_block
+
+    response = {
+        'last_block': last_block
+    }
+    return jsonify(response), 200
+
+
+# @app.route('/block/new', methods=['POST'])
+# def new_block():
+#     values = request.get_json()
+
+#     # Check that the required fields are in the POST'ed data
+#     required = ['block']
+#     if not all(k in values for k in required):
+#         return 'Missing Values', 400
+
+#     # TODO: Verify that the sender is one of our peers
+
+#     # TODO: Check that the new block index is 1 higher than our last block
+#     # that it has a valid proof
+
+#     # TODO: Otherwise, check for consensus
+#     # Don't forget to send a response before asking for the full
+#     # chain from a server awaiting a response.
+
+#     return response, 200
+
+
+@app.route('/nodes/register', methods=['POST'])
+def register_nodes():
+
+    values = request.get_json()
+    nodes = values.get('nodes')
+    if nodes is None:
+        return "Error: Please supply a valid list of nodes", 400
+
+    for node in nodes:
+        blockchain.register_node(node)
+
+    response = {
+        'message': 'New nodes have been added',
+        'total_nodes': list(blockchain.nodes),
+    }
+    return jsonify(response), 201
+
+
+@app.route('/block/new', methods=['POST'])
+def receive_block():
+    values = request.get_json()
+
+    new_block = values['block']
+    old_block = blockchain.last_block
+
+    if new_block['index'] == old_block['index'] + 1:
+        #  Index is correct
+        if new_block['previous_hash'] == blockchain.hash(old_block):
+            # Hashes are correcet
+            block_string = json.dumps(old_block, sort_keys=True).encode()
+            if blockchain.valid_proof(block_string, new_block['proof']):
+                # proof is valid
+                blockchain.add_block(new_block)
+                return 'Block Accepted'
+            else:
+                # Bad proof
+                pass
+        else:
+            # Hashes don't match
+            pass
+    else:
+        # Their index is one greater
+        # Block could be invalid
+        # We could be behind
+
+        # Do the consensus process:
+        # Poll all of the nodes in our chain, and get the biggest one
+        pass
+
+
+# ############Additional Code Added by our Colleagues################
+# TODO: Get rid of the previous if __main__ and use this so we can change
+# ports via the command line.  Note that this is not robust and will
+# not catch errors
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    if len(sys.argv) > 1:
+        port = int(sys.argv[1])
+    else:
+        port = 5000
+    app.run(host='0.0.0.0', port=port)
