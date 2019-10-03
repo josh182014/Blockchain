@@ -5,6 +5,8 @@
 import hashlib
 import requests
 import json
+import os.path
+import uuid
 
 
 # TODO: Implement functionality to search for a proof
@@ -59,8 +61,16 @@ if __name__ == '__main__':
         data = requests.get(url=node + '/last_block').json()
         new_proof = proof_of_work(data['last_block'])
 
+        if os.path.exists("my_id.txt"):
+            with open("my_id.txt", "r") as file:
+                receipent_id = file.read()
+        else:
+            with open("my_id.txt", 'w+') as file:
+                file.write(uuid.uuid4().hex)
+                receipent_id = file.read()
+
         # TODO: When found, POST it to the server {"block": new_block}
-        post_data = {'proof': new_proof, 'id': 5}
+        post_data = {'proof': new_proof, 'id': receipent_id}
         data = requests.post(url=node + '/mine', json=post_data).json()
         # TODO: If the server responds with 'New Block Forged'
 
@@ -71,4 +81,4 @@ if __name__ == '__main__':
             coins_mined += 1
         else:
             print(data.get('message'))
-        # time.sleep(0.2)
+        # time.sleep(0.2) <-- so my computer doesn't burst into flames
